@@ -1,0 +1,32 @@
+name: Deploy AfriTech Pulse to Azure
+
+on:
+  push:
+    branches:
+      - main  # Runs every time you push to main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+
+      - name: 🔐 Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ⬆️ Upload to Azure Blob Storage
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.STORAGE_ACCOUNT_NAME }} \
+            --container-name '$web' \
+            --name index.html \
+            --file index.html \
+            --content-type "text/html" \
+            --overwrite
+
+      - name: ✅ Done
+        run: echo "AfriTech Pulse deployed successfully!"

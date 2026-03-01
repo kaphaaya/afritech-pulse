@@ -597,12 +597,11 @@
     // ─── FETCH NEWS (via proxy to fix CORS) ───
     async function fetchNews(query) {
         const targetUrl = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&language=en&sortBy=publishedAt&pageSize=20&apiKey=${API_KEY}`;
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+     const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
         try {
             const res = await fetch(proxyUrl);
             const data = await res.json();
-            const parsed = JSON.parse(data.contents);
-            return parsed.articles || [];
+            return data.articles || [];
         } catch(e) {
             console.error('Fetch error:', e);
             return [];

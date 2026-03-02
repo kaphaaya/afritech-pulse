@@ -173,11 +173,8 @@ afritech-pulse/
 
 ## Screenshots
 
-### Live Site
+### Live Site (3)
 *[Screenshot of live AfriTech Pulse site]*
-
-### Africa Spotlight Section
-*[Screenshot of Africa & Nigeria news section]*
 
 ### GitHub Actions — Successful Deployment
 *[Screenshot of green workflow in Actions tab]*

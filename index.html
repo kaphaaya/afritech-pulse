@@ -582,35 +582,63 @@
     document.getElementById('current-date').textContent =
         new Date().toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
 
-    // ─── RSS SOURCES ───
-<script>
-    // ─── STATE ───
-    let allArticles = [];
-
-    const AFRICA_KEYWORDS = ['nigeria', 'ghana', 'kenya', 'africa', 'african', 'nairobi',
-        'lagos', 'accra', 'cairo', 'johannesburg', 'rwanda', 'ethiopia', 'fintech africa'];
-
-    // ─── DATE ───
-    document.getElementById('current-date').textContent =
-        new Date().toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
-
-    // ─── GNEWS API ───
-    const GNEWS_KEY = 'dc71c63775857b1c5e34fb50ea4a1e3f';
-    const GNEWS_BASE = 'https://gnews.io/api/v4/search';
-
-    async function fetchGNews(query, tags) {
+    // ─── HACKER NEWS API ───
+    async function fetchHackerNews() {
         try {
-            const url = `${GNEWS_BASE}?q=${encodeURIComponent(query)}&lang=en&max=10&apikey=${GNEWS_KEY}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            return (data.articles || []).map(a => ({
-                title: a.title,
-                description: a.description || '',
-                url: a.url,
-                publishedAt: a.publishedAt,
-                source: { name: a.source?.name || 'Unknown' },
-                feedTags: tags
-            }));
+            const res = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
+            const ids = await res.json();
+            const top30 = ids.slice(0, 30);
+            const stories = await Promise.all(
+                top30.map(id =>
+                    fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`)
+                        .then(r => r.json())
+                        .catch(() => null)
+                )
+            );
+            return stories
+                .filter(s => s && s.type === 'story' && s.url && s.title && s.title.length > 10)
+                .map(s => ({
+                    title: s.title,
+                    description: s.text
+                        ? s.text.replace(/<[^>]*>/g, '').slice(0, 200)
+                        : `${s.score} points · ${s.descendants || 0} comments · by ${s.by}`,
+                    url: s.url,
+                    publishedAt: new Date(s.time * 1000).toISOString(),
+                    source: { name: 'Hacker News' },
+                    feedTags: getHNTags(s.title)
+                }));
+        } catch(e) {
+            return [];
+        }
+    }
+
+    function getHNTags(title) {
+        const t = title.toLowerCase();
+        const tags = [];
+        if (/\bai\b|artificial intelligence|chatgpt|openai|llm|machine learning|gpt|claude|gemini/.test(t)) tags.push('ai');
+        if (/africa|nigeria|ghana|kenya|rwanda|nairobi|lagos|accra|cairo/.test(t)) tags.push('africa');
+        if (/crypto|bitcoin|blockchain|web3|defi|nft|ethereum/.test(t)) tags.push('crypto');
+        if (/startup|funding|venture|seed round|raises/.test(t)) tags.push('startups');
+        if (/cloud|aws|azure|gcp|google cloud/.test(t)) tags.push('cloud');
+        return tags.length ? tags : ['tech'];
+    }
+
+    // ─── DEV.TO API ───
+    async function fetchDevTo(tag, feedTags) {
+        try {
+            const res = await fetch(`https://dev.to/api/articles?tag=${tag}&per_page=10`);
+            const articles = await res.json();
+            if (!Array.isArray(articles)) return [];
+            return articles
+                .filter(a => a.title && a.title.length > 10)
+                .map(a => ({
+                    title: a.title,
+                    description: a.description || '',
+                    url: a.url,
+                    publishedAt: a.published_at,
+                    source: { name: `dev.to` },
+                    feedTags: feedTags
+                }));
         } catch(e) {
             return [];
         }
@@ -620,15 +648,15 @@
         document.getElementById('news-grid').innerHTML =
             '<p style="color:var(--muted);padding:40px;text-align:center">⏳ Loading latest stories...</p>';
 
-        const [aiNews, africaNews, cryptoNews, startupNews] = await Promise.all([
-            fetchGNews('artificial intelligence OR OpenAI OR ChatGPT', ['ai']),
-            fetchGNews('Africa tech OR Nigeria startup OR Ghana fintech', ['africa', 'startups']),
-            fetchGNews('Bitcoin OR blockchain OR Web3 OR crypto', ['crypto']),
-            fetchGNews('tech startup funding OR venture capital', ['startups']),
+        const [hnStories, aiArticles, webdevArticles, cloudArticles] = await Promise.all([
+            fetchHackerNews(),
+            fetchDevTo('ai', ['ai']),
+            fetchDevTo('webdev', ['tech']),
+            fetchDevTo('cloud', ['cloud']),
         ]);
 
         const seen = new Set();
-        allArticles = [...aiNews, ...africaNews, ...cryptoNews, ...startupNews]
+        allArticles = [...hnStories, ...aiArticles, ...webdevArticles, ...cloudArticles]
             .filter(a => {
                 if (!a.title || a.title.length < 10) return false;
                 if (seen.has(a.title)) return false;

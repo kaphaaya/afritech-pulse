@@ -583,34 +583,33 @@
         new Date().toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
 
     // ─── RSS SOURCES ───
-    // Using rss2json.com free API to convert RSS → JSON (no key needed for basic use)
-    // Feeds: TechCrunch AI, The Verge, Wired, TechCabal (Africa), CoinDesk, VentureBeat
-    const RSS_FEEDS = [
-    { url: 'https://techcrunch.com/feed/', tags: ['ai', 'startups'] },
-    { url: 'https://www.theverge.com/rss/index.xml', tags: ['ai', 'cloud'] },
-    { url: 'https://feeds.wired.com/wired/index', tags: ['ai', 'cloud'] },
-    { url: 'https://techcabal.com/feed/', tags: ['africa', 'startups'] },
-    { url: 'https://venturebeat.com/feed/', tags: ['ai', 'startups'] },
-    { url: 'https://thenextweb.com/feed/', tags: ['ai', 'startups'] },
-    { url: 'https://rss.cnn.com/rss/edition_technology.rss', tags: ['ai'] },
-    { url: 'https://feeds.bbci.co.uk/news/technology/rss.xml', tags: ['ai', 'cloud'] },
-];
+<script>
+    // ─── STATE ───
+    let allArticles = [];
 
-    const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
+    const AFRICA_KEYWORDS = ['nigeria', 'ghana', 'kenya', 'africa', 'african', 'nairobi',
+        'lagos', 'accra', 'cairo', 'johannesburg', 'rwanda', 'ethiopia', 'fintech africa'];
 
-    async function fetchRSSFeed(feed) {
+    // ─── DATE ───
+    document.getElementById('current-date').textContent =
+        new Date().toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+
+    // ─── GNEWS API ───
+    const GNEWS_KEY = 'dc71c63775857b1c5e34fb50ea4a1e3f';
+    const GNEWS_BASE = 'https://gnews.io/api/v4/search';
+
+    async function fetchGNews(query, tags) {
         try {
-            const res = await fetch(`${RSS2JSON}${encodeURIComponent(feed.url)}&count=15`);
+            const url = `${GNEWS_BASE}?q=${encodeURIComponent(query)}&lang=en&max=10&apikey=${GNEWS_KEY}`;
+            const res = await fetch(url);
             const data = await res.json();
-            if (data.status !== 'ok') return [];
-            return data.items.map(item => ({
-                title: item.title,
-                description: item.description ? item.description.replace(/<[^>]*>/g, '').slice(0, 200) : '',
-                url: item.link,
-                publishedAt: item.pubDate,
-                source: { name: data.feed?.title || 'Unknown' },
-                urlToImage: item.thumbnail || item.enclosure?.link || null,
-                feedTags: feed.tags
+            return (data.articles || []).map(a => ({
+                title: a.title,
+                description: a.description || '',
+                url: a.url,
+                publishedAt: a.publishedAt,
+                source: { name: a.source?.name || 'Unknown' },
+                feedTags: tags
             }));
         } catch(e) {
             return [];
@@ -618,16 +617,18 @@
     }
 
     async function loadAllNews() {
-        // Show loading state
         document.getElementById('news-grid').innerHTML =
             '<p style="color:var(--muted);padding:40px;text-align:center">⏳ Loading latest stories...</p>';
 
-        const results = await Promise.allSettled(RSS_FEEDS.map(f => fetchRSSFeed(f)));
-        const allFetched = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+        const [aiNews, africaNews, cryptoNews, startupNews] = await Promise.all([
+            fetchGNews('artificial intelligence OR OpenAI OR ChatGPT', ['ai']),
+            fetchGNews('Africa tech OR Nigeria startup OR Ghana fintech', ['africa', 'startups']),
+            fetchGNews('Bitcoin OR blockchain OR Web3 OR crypto', ['crypto']),
+            fetchGNews('tech startup funding OR venture capital', ['startups']),
+        ]);
 
-        // Deduplicate by title
         const seen = new Set();
-        allArticles = allFetched
+        allArticles = [...aiNews, ...africaNews, ...cryptoNews, ...startupNews]
             .filter(a => {
                 if (!a.title || a.title.length < 10) return false;
                 if (seen.has(a.title)) return false;
@@ -635,12 +636,7 @@
                 return true;
             })
             .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
-            .map(a => ({
-                ...a,
-                tags: getTags(a),
-                isAfrica: isAfricaStory(a)
-            }));
-
+            .map(a => ({ ...a, tags: getTags(a), isAfrica: isAfricaStory(a) }));
 
         if (allArticles.length === 0) {
             document.getElementById('news-grid').innerHTML =
@@ -687,7 +683,6 @@
         return `${Math.floor(diff/86400)}d ago`;
     }
 
-    // ─── RENDER HERO ───
     function renderHero() {
         const top = allArticles.slice(0, 4);
         if (!top.length) return;
@@ -720,16 +715,13 @@
             </div>`;
     }
 
-    // ─── RENDER AFRICA SECTION ───
     function renderAfricaSection() {
         const africaStories = allArticles.filter(a => a.isAfrica).slice(0, 6);
         const el = document.getElementById('africa-section');
-
         if (!africaStories.length) {
             el.innerHTML = '<p style="color:var(--muted);font-size:0.85rem">No Africa-specific stories found right now — check back soon.</p>';
             return;
         }
-
         el.innerHTML = africaStories.map(a => `
             <a class="africa-item" href="${a.url}" target="_blank">
                 <div class="africa-item-title">${a.title}</div>
@@ -737,14 +729,12 @@
             </a>`).join('');
     }
 
-    // ─── RENDER GRID ───
     function renderGrid(articles) {
         const el = document.getElementById('news-grid');
         if (!articles.length) {
             el.innerHTML = '<p style="color:var(--muted);padding:40px;text-align:center">No stories found for this category.</p>';
             return;
         }
-
         el.innerHTML = articles.slice(0, 18).map(a => {
             const [cat, catClass] = getCategoryLabel(a.tags);
             return `
@@ -760,19 +750,14 @@
         }).join('');
     }
 
-    // ─── FILTER ───
     function filterNews(filter, btn) {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
         if (btn) btn.classList.add('active');
-
-        const filtered = filter === 'all'
-            ? allArticles
-            : allArticles.filter(a => a.tags.includes(filter));
+        const filtered = filter === 'all' ? allArticles : allArticles.filter(a => a.tags.includes(filter));
         renderGrid(filtered);
     }
 
-    // ─── STATS ───
     function updateStats() {
         document.getElementById('stat-articles').textContent = allArticles.length;
         const sources = new Set(allArticles.map(a => a.source?.name)).size;
@@ -780,16 +765,12 @@
         document.getElementById('article-count').textContent = `${allArticles.length} stories loaded`;
     }
 
-    // ─── TICKER ───
     function updateTicker() {
         const headlines = allArticles.slice(0, 8).map(a => `📰 ${a.title}`).join(' &nbsp;|&nbsp; ');
         document.getElementById('ticker-text').innerHTML = headlines;
     }
 
-    // ─── INIT ───
     loadAllNews();
-
-    // Auto-refresh every 30 minutes
     setInterval(loadAllNews, 30 * 60 * 1000);
 </script>
 

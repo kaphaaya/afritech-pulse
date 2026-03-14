@@ -567,25 +567,13 @@
 <!-- FOOTER -->
 <footer>
     <div class="footer-logo">AfriTech Pulse</div>
-    <div>Powered by NewsAPI · Built for Africa · Deployed on Azure</div>
+    <div>Powered by Live RSS Feeds · Built for Africa · Deployed on Azure</div>
     <div>© 2025 AfriTech Pulse. All rights reserved.</div>
 </footer>
 
 <script>
-    // ─── CONFIG ───
-    const API_KEY = 'df1ceff9c5a14cee9c149583557c812f';
-
     // ─── STATE ───
     let allArticles = [];
-
-    // ─── SEARCH TERMS ───
-    const QUERIES = {
-        ai: 'artificial intelligence OR machine learning OR ChatGPT OR OpenAI OR Gemini OR Claude AI',
-        africa: 'Africa OR Nigeria OR Ghana OR Kenya OR Rwanda tech OR startup',
-        crypto: 'cryptocurrency OR blockchain OR Web3 OR Bitcoin OR DeFi',
-        startups: 'tech startup OR venture capital OR funding round Africa',
-        cloud: 'cloud computing OR AWS OR Azure OR Google Cloud'
-    };
 
     const AFRICA_KEYWORDS = ['nigeria', 'ghana', 'kenya', 'africa', 'african', 'nairobi',
         'lagos', 'accra', 'cairo', 'johannesburg', 'rwanda', 'ethiopia', 'fintech africa'];
@@ -594,44 +582,71 @@
     document.getElementById('current-date').textContent =
         new Date().toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
 
-    // ─── FETCH NEWS (via proxy to fix CORS) ───
-    async function fetchNews(query) {
-        const targetUrl = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&language=en&sortBy=publishedAt&pageSize=20&apiKey=${API_KEY}`;
-     const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+    // ─── RSS SOURCES ───
+    // Using rss2json.com free API to convert RSS → JSON (no key needed for basic use)
+    // Feeds: TechCrunch AI, The Verge, Wired, TechCabal (Africa), CoinDesk, VentureBeat
+    const RSS_FEEDS = [
+        { url: 'https://techcrunch.com/feed/', tags: ['ai', 'startups'] },
+        { url: 'https://www.theverge.com/rss/index.xml', tags: ['ai', 'cloud'] },
+        { url: 'https://feeds.wired.com/wired/index', tags: ['ai', 'cloud'] },
+        { url: 'https://techcabal.com/feed/', tags: ['africa', 'startups'] },
+        { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', tags: ['crypto'] },
+        { url: 'https://venturebeat.com/feed/', tags: ['ai', 'startups'] },
+        { url: 'https://thenextweb.com/feed/', tags: ['ai', 'startups'] },
+        { url: 'https://africa.businessinsider.com/rss', tags: ['africa'] },
+    ];
+
+    const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
+
+    async function fetchRSSFeed(feed) {
         try {
-            const res = await fetch(proxyUrl);
+            const res = await fetch(`${RSS2JSON}${encodeURIComponent(feed.url)}&count=15`);
             const data = await res.json();
-            return data.articles || [];
+            if (data.status !== 'ok') return [];
+            return data.items.map(item => ({
+                title: item.title,
+                description: item.description ? item.description.replace(/<[^>]*>/g, '').slice(0, 200) : '',
+                url: item.link,
+                publishedAt: item.pubDate,
+                source: { name: data.feed?.title || 'Unknown' },
+                urlToImage: item.thumbnail || item.enclosure?.link || null,
+                feedTags: feed.tags
+            }));
         } catch(e) {
-            console.error('Fetch error:', e);
             return [];
         }
     }
 
     async function loadAllNews() {
-        const [aiNews, africaNews, cryptoNews] = await Promise.all([
-            fetchNews(QUERIES.ai),
-            fetchNews(QUERIES.africa),
-            fetchNews(QUERIES.crypto)
-        ]);
+        // Show loading state
+        document.getElementById('news-grid').innerHTML =
+            '<p style="color:var(--muted);padding:40px;text-align:center">⏳ Loading latest stories...</p>';
 
-        // Combine and deduplicate by title
+        const results = await Promise.allSettled(RSS_FEEDS.map(f => fetchRSSFeed(f)));
+        const allFetched = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+
+        // Deduplicate by title
         const seen = new Set();
-        allArticles = [...aiNews, ...africaNews, ...cryptoNews]
+        allArticles = allFetched
             .filter(a => {
-                if (!a.title || a.title === '[Removed]') return false;
+                if (!a.title || a.title.length < 10) return false;
                 if (seen.has(a.title)) return false;
                 seen.add(a.title);
                 return true;
             })
-            .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+            .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+            .map(a => ({
+                ...a,
+                tags: getTags(a),
+                isAfrica: isAfricaStory(a)
+            }));
 
-        // Tag each article
-        allArticles = allArticles.map(a => ({
-            ...a,
-            tags: getTags(a),
-            isAfrica: isAfricaStory(a)
-        }));
+
+        if (allArticles.length === 0) {
+            document.getElementById('news-grid').innerHTML =
+                '<p style="color:var(--muted);padding:40px;text-align:center">⚠️ Could not load stories right now. Please refresh.</p>';
+            return;
+        }
 
         updateStats();
         renderHero();
@@ -642,12 +657,12 @@
 
     function getTags(article) {
         const text = `${article.title} ${article.description || ''}`.toLowerCase();
-        const tags = [];
-        if (/ai|artificial intelligence|machine learning|chatgpt|openai|gemini|llm/.test(text)) tags.push('ai');
-        if (/crypto|bitcoin|blockchain|web3|defi|nft/.test(text)) tags.push('crypto');
-        if (/africa|nigeria|ghana|kenya|rwanda|nairobi|lagos/.test(text)) tags.push('africa');
-        if (/startup|funding|venture|seed round/.test(text)) tags.push('startups');
-        if (/cloud|aws|azure|google cloud/.test(text)) tags.push('cloud');
+        const tags = [...(article.feedTags || [])];
+        if (/ai|artificial intelligence|machine learning|chatgpt|openai|gemini|llm|claude/.test(text) && !tags.includes('ai')) tags.push('ai');
+        if (/crypto|bitcoin|blockchain|web3|defi|nft/.test(text) && !tags.includes('crypto')) tags.push('crypto');
+        if (/africa|nigeria|ghana|kenya|rwanda|nairobi|lagos/.test(text) && !tags.includes('africa')) tags.push('africa');
+        if (/startup|funding|venture|seed round/.test(text) && !tags.includes('startups')) tags.push('startups');
+        if (/cloud|aws|azure|google cloud/.test(text) && !tags.includes('cloud')) tags.push('cloud');
         return tags;
     }
 
